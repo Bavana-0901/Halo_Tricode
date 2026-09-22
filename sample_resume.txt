@@ -1,0 +1,32 @@
+Alex Mercer
+Senior Software Engineer | Backend & AI Systems
+Email: alex.mercer@email.com | Phone: (555) 019-2831 | GitHub: github.com/alexmercer | Location: San Francisco, CA
+
+SUMMARY
+Passionate Backend Engineer with 5+ years of experience architecting high-throughput microservices, REST APIs, and machine learning pipelines. Proficient in Python, FastAPI, React, SQL, PostgreSQL, Docker, and Redis.
+
+TECHNICAL SKILLS
+- Programming Languages: Python, JavaScript, TypeScript, SQL, C++, HTML/CSS
+- Frameworks & Libraries: FastAPI, Django, React.js, Express, PyTorch, Scikit-learn, Pandas, NumPy
+- Databases & Storage: PostgreSQL, Redis, MongoDB, SQLite, FAISS
+- DevOps & Tools: Docker, Git, GitHub Actions, Linux, Postman, Vite, Jira
+
+PROFESSIONAL EXPERIENCE
+Senior Backend Engineer | DataPulse Systems (2022 - Present)
+- Designed and built scalable RESTful microservices using Python and FastAPI handling 15M daily requests.
+- Optimized database queries and PostgreSQL indexing, reducing average response latency by 45%.
+- Implemented FAISS vector similarity search for internal knowledge base retrieval (RAG), improving document match precision by 35%.
+- Containerized backend application components with Docker and managed deployment pipelines using Git and GitHub Actions.
+
+Software Developer | CloudTech Solutions (2019 - 2022)
+- Developed responsive web interface modules using React.js, JavaScript, and Tailwind CSS.
+- Created automated data processing pipelines using Python, Pandas, and NumPy for business intelligence reporting.
+- Spearheaded database migration from SQLite to PostgreSQL with zero downtime.
+
+EDUCATION & CERTIFICATIONS
+- Bachelor of Science in Computer Science | University of California, Berkeley (2019)
+- AWS Certified Cloud Practitioner
+
+PROJECTS
+- AI-Powered Semantic Search Engine: Built a vector search application using Python, FastAPI, PyTorch, and FAISS vector database.
+- Smart Task Management API: Microservice application developed with Django, Redis caching, and PostgreSQL.

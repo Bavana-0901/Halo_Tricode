@@ -1,0 +1,17 @@
+Job Title: Senior Backend & AI Engineer
+Location: Remote / San Francisco, CA
+
+About the Role:
+We are looking for a Senior Backend & AI Engineer to join our core talent platform engineering team. In this role, you will design robust REST APIs, build vector similarity search engines, and deploy scalable microservices in production.
+
+Requirements:
+- 3+ years of experience with Python, FastAPI, and asynchronous backend development.
+- Strong proficiency with SQL, PostgreSQL, and Redis caching.
+- Demonstrated experience with Vector Databases (FAISS, Pinecone, or Qdrant) and AI/ML libraries (PyTorch, Scikit-learn, SentenceTransformers).
+- Hands-on experience with Docker, Kubernetes, and AWS cloud deployment.
+- Solid background in REST API architecture, unit testing, and Git version control.
+- Bachelor's degree in Computer Science or equivalent field.
+
+Preferred Qualifications:
+- Experience building RAG pipelines and LLM applications.
+- Exposure to frontend web development with React.js or TypeScript.
