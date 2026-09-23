@@ -2,6 +2,15 @@ import re
 import math
 import io
 from typing import List, Dict, Any, Tuple
+import os
+import json
+try:
+    import google.generativeai as genai
+    genai.configure(api_key=os.environ.get("GEMINI_API_KEY", ""))
+    llm_model = genai.GenerativeModel('gemini-2.5-flash')
+except ImportError:
+    genai = None
+    llm_model = None
 
 # Try imports for document processing
 try:
@@ -436,47 +445,66 @@ def analyze_ats(resume_text: str, jd_text: str) -> Dict[str, Any]:
 
 # --- TAILORED INTERVIEW GENERATOR ---
 def generate_interview_questions(resume_text: str, jd_text: str, gaps: List[Dict[str, Any]], vector_index: VectorIndex) -> List[Dict[str, Any]]:
-    """Generate 5 personalized, non-generic interview questions based on candidate profile & JD gaps."""
+    """Generate personalized, non-generic interview questions based on candidate profile & JD."""
     r_cat_skills, r_skills = extract_skills(resume_text)
     
+    if llm_model and os.environ.get("GEMINI_API_KEY"):
+        prompt = f"""
+        You are an expert technical interviewer.
+        Generate exactly 5 tailored interview questions for this specific candidate based on their resume and the job description.
+        Do NOT generate generic questions. The questions should reference their actual skills, projects, and experience mentioned below.
+        
+        Resume text: {resume_text[:2000]}
+        Job Description: {jd_text[:1000]}
+        
+        Return the response strictly as a JSON array of objects.
+        Each object must have exactly these keys: "id" (like "q1"), "category" (e.g. "System Design"), "question" (the full question text), "context" (why this question is being asked based on the resume).
+        """
+        try:
+            resp = llm_model.generate_content(prompt)
+            raw_text = resp.text.strip().replace("```json", "").replace("```", "")
+            return json.loads(raw_text)
+        except Exception as e:
+            print(f"Gemini API error for questions: {e}")
+            # fallback below
+
+    # Fallback completely dynamic (if no API key)
     questions = []
     
-    # Q1: Project & Architecture Question
     top_proj_chunks = vector_index.search("project built developed architecture", top_k=1)
-    proj_context = top_proj_chunks[0]["text"][:120] if top_proj_chunks else "your core technical projects"
+    proj_context = top_proj_chunks[0]["text"][:120] if top_proj_chunks else "your foundational projects"
+    
     questions.append({
         "id": "q1",
         "category": "Project Architecture & System Design",
-        "question": f"In your resume, you mentioned work on: '{proj_context}...'. Can you walk me through the system architecture and key technical trade-offs you made?",
-        "context": "Evaluates practical implementation depth and architectural decision-making."
+        "question": f"In your resume, you highlighted: '{proj_context}...'. Can you walk me through the system architecture and key technical trade-offs you made on that specific initiative?",
+        "context": "Evaluates practical implementation depth on their actual reported project."
     })
     
-    # Q2: Skill Gap / Challenge Question
     if gaps:
         gap_skill = gaps[0]["skill"]
         questions.append({
             "id": "q2",
             "category": "Target Skill Gap & Deep Dive",
-            "question": f"The job description strongly emphasizes production experience with {gap_skill}. How would you approach applying {gap_skill} in our environment given your background?",
+            "question": f"The job heavily utilizes {gap_skill}. Your resume shows you haven't explicitly detailed production experience with it. How would you approach applying {gap_skill} in our environment given your background?",
             "context": f"Probes candidate's adaptability to bridge the identified {gap_skill} gap."
         })
-    else:
+    elif r_skills:
         questions.append({
             "id": "q2",
             "category": "Technical Mastery",
-            "question": "How do you optimize performance and manage scalability challenges in your primary stack?",
-            "context": "Tests senior-level optimization capabilities."
+            "question": f"You mentioned expertise in {r_skills[0]}. How do you optimize performance and manage scalability challenges when building systems with {r_skills[0]}?",
+            "context": f"Tests optimization capabilities in their primary skill."
         })
 
-    # Q3: Hands-on Problem Solving
+    primary_stack = r_skills[:3] if r_skills else ["your primary stack"]
     questions.append({
         "id": "q3",
         "category": "Debugging & Troubleshooting",
-        "question": "Describe a critical bug or production outage you faced in a recent project. How did you diagnose the root cause and resolve it?",
+        "question": f"Describe a critical bug or production outage you faced while working with {', '.join(primary_stack)}. How did you diagnose the root cause and resolve it?",
         "context": "Measures analytical troubleshooting and resilience under pressure."
     })
 
-    # Q4: Domain / JD Requirement
     j_cat_skills, j_skills = extract_skills(jd_text)
     core_jd_sk = j_skills[0] if j_skills else "software engineering best practices"
     questions.append({
@@ -486,15 +514,73 @@ def generate_interview_questions(resume_text: str, jd_text: str, gaps: List[Dict
         "context": f"Verifies alignment with key team skill: {core_jd_sk}."
     })
 
-    # Q5: Behavioral & Leadership
     questions.append({
         "id": "q5",
         "category": "Collaboration & Delivery",
-        "question": "Tell me about a situation where you had a technical disagreement with a team member or stakeholder regarding project requirements. How did you resolve it?",
-        "context": "Assesses communication, teamwork, and conflict resolution skills."
+        "question": "Tell me about a situation where you had a technical disagreement regarding requirements for one of the projects listed on your resume. How did you resolve it?",
+        "context": "Assesses communication, teamwork, and conflict resolution skills on actual projects."
     })
 
     return questions
+
+def generate_candidate_summary(resume_text: str, jd_text: str, skills: List[str]) -> str:
+    if llm_model and os.environ.get("GEMINI_API_KEY"):
+        prompt = f"""
+        Write a concise, professional summary for this candidate.
+        Mention their profile, key skills shown ({', '.join(skills[:5])}), the strengths identified from their resume, and overall observations relevant to the JD.
+        Keep it under 3-4 sentences.
+        Resume: {resume_text[:1500]}
+        """
+        try:
+            return llm_model.generate_content(prompt).text.strip()
+        except:
+            pass
+            
+    summary = f"The candidate has uploaded a resume containing {len(resume_text.split())} words. "
+    if skills:
+        summary += f"They demonstrated {len(skills)} technical skills, primarily including {', '.join(skills[:4])}. "
+    summary += "Overall, their profile exhibits potential alignment with the core responsibilities outlined in the job description."
+    return summary
+
+def evaluate_dynamic_interview_answer(question: str, answer: str, resume_text: str) -> Dict[str, Any]:
+    if not answer or len(answer.strip()) < 5:
+        return {
+            "score": 20,
+            "feedback": "Answer is too brief to evaluate properly.",
+            "strengths": ["Responded to prompt"],
+            "improvements": ["Provide a much more detailed technical response using the STAR method."]
+        }
+        
+    if llm_model and os.environ.get("GEMINI_API_KEY"):
+        prompt = f"""
+        You are a technical interviewer evaluating a candidate's answer.
+        Question: {question}
+        Candidate's Answer: {answer}
+        Candidate's Resume Context: {resume_text[:1000]}
+        
+        Evaluate the answer strictly based on technical accuracy, depth, and relevance.
+        Return ONLY a JSON object with these exact keys:
+        - "score" (integer 0-100)
+        - "feedback" (string, 1-2 sentence overall feedback)
+        - "strengths" (list of strings)
+        - "improvements" (list of strings)
+        """
+        try:
+            resp = llm_model.generate_content(prompt)
+            raw_text = resp.text.strip().replace("```json", "").replace("```", "")
+            return json.loads(raw_text)
+        except Exception as e:
+            print(f"Gemini evaluation error: {e}")
+
+    # Fallback dynamic evaluation
+    ans_length = len(answer.split())
+    score = min(100, max(20, int(ans_length * 1.5)))
+    return {
+        "score": score,
+        "feedback": "Strong answer with good technical depth!" if score >= 80 else "Decent start, but needs more concrete technical examples.",
+        "strengths": ["Clear concise answer." if ans_length < 30 else "Detailed comprehensive response."],
+        "improvements": ["Include quantitative metrics and specific architectural decisions."] if ans_length < 50 else ["Maintain this level of context."]
+    }
 
 
 # --- CAREER INTELLIGENCE ROLE COMPATIBILITY ---

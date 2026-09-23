@@ -3,6 +3,7 @@ import { Users, Upload, Search, Send, Sparkles, CheckCircle2, AlertTriangle, Lay
 
 export default function RecruiterView() {
   const [files, setFiles] = useState([]);
+  const [pastedText, setPastedText] = useState('');
   const [jdText, setJdText] = useState('');
   const [loading, setLoading] = useState(false);
   const [candidates, setCandidates] = useState([]);
@@ -20,11 +21,16 @@ export default function RecruiterView() {
 
   const handleAnalyzeMulti = async (e) => {
     e.preventDefault();
-    if (files.length === 0 || !jdText.trim()) return;
+    if ((files.length === 0 && !pastedText.trim()) || !jdText.trim()) return;
 
     setLoading(true);
     const formData = new FormData();
-    files.forEach((f) => formData.append('files', f));
+    if (files.length > 0) {
+      files.forEach((f) => formData.append('files', f));
+    }
+    if (pastedText.trim()) {
+      formData.append('pasted_text', pastedText);
+    }
     formData.append('jd_text', jdText);
 
     try {
@@ -89,13 +95,24 @@ export default function RecruiterView() {
               <input
                 type="file"
                 multiple
-                accept=".pdf,.docx,.txt"
+                accept=".pdf,.docx,.doc,.txt,.md,.rtf,.csv"
                 onChange={handleFilesChange}
                 className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-xs text-slate-300 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-indigo-600 file:text-white hover:file:bg-indigo-500"
               />
-              <div className="text-xs text-slate-500 mt-2">
-                {files.length > 0 ? `${files.length} resume file(s) selected.` : "Choose PDF/DOCX/TXT files."}
+              <div className="text-xs text-slate-500 mt-2 mb-4">
+                {files.length > 0 ? `${files.length} resume file(s) selected.` : "Choose files."}
               </div>
+
+              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+                OR Paste Resume Text
+              </label>
+              <textarea
+                value={pastedText}
+                onChange={(e) => setPastedText(e.target.value)}
+                rows={3}
+                placeholder="Paste candidate resume manually..."
+                className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 resize-none"
+              />
             </div>
 
             <div>
@@ -114,12 +131,11 @@ export default function RecruiterView() {
 
           <button
             type="submit"
-            disabled={files.length === 0 || !jdText.trim() || loading}
-            className={`w-full py-3 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-2 transition-all ${
-              files.length === 0 || !jdText.trim() || loading
+            disabled={(files.length === 0 && !pastedText.trim()) || !jdText.trim() || loading}
+            className={`w-full py-3 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-2 transition-all ${(files.length === 0 && !pastedText.trim()) || !jdText.trim() || loading
                 ? 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
                 : 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 shadow-lg'
-            }`}
+              }`}
           >
             {loading ? (
               <span>Processing Vector Embeddings for {files.length} Candidates...</span>
@@ -200,7 +216,7 @@ export default function RecruiterView() {
         {copilotResponse && (
           <div className="p-4 rounded-xl bg-slate-950 border border-purple-500/20 space-y-3">
             <div className="text-sm font-bold text-purple-300">{copilotResponse.answer}</div>
-            
+
             <div className="space-y-2">
               {copilotResponse.matches?.map((m, idx) => (
                 <div key={idx} className="p-3 rounded-lg bg-slate-900 border border-slate-800 text-xs space-y-1">

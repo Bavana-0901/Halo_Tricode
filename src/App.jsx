@@ -1,17 +1,16 @@
 import React, { useState } from 'react';
-import { 
-  Sparkles, 
-  LayoutDashboard, 
-  ShieldCheck, 
-  Layers, 
-  Dna, 
-  Compass, 
-  MapPin, 
-  Sliders, 
-  GraduationCap, 
-  Cpu, 
-  Database, 
-  Users, 
+import {
+  Sparkles,
+  LayoutDashboard,
+  ShieldCheck,
+  Layers,
+  Dna,
+  Compass,
+  MapPin,
+  Sliders,
+  Cpu,
+  Database,
+  Users,
   Upload,
   ChevronRight,
   Menu,
@@ -24,9 +23,7 @@ import ResumeAnalysisView from './components/ResumeAnalysisView';
 import JobMatchView from './components/JobMatchView';
 import SkillDnaView from './components/SkillDnaView';
 import CareerIntelligenceView from './components/CareerIntelligenceView';
-import CareerGpsView from './components/CareerGpsView';
 import WhatIfView from './components/WhatIfView';
-import LearningPathView from './components/LearningPathView';
 import AiInterviewView from './components/AiInterviewView';
 import EvidenceView from './components/EvidenceView';
 import RecruiterView from './components/RecruiterView';
@@ -38,12 +35,13 @@ export default function App() {
   const [error, setError] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  const handleAnalyze = async (file, jdText) => {
+  const handleAnalyze = async (file, jdFile, jdText) => {
     setLoading(true);
     setError(null);
     const formData = new FormData();
-    formData.append('file', file);
-    formData.append('jd_text', jdText);
+    if (file) formData.append('file', file);
+    if (jdFile) formData.append('jd_file', jdFile);
+    if (jdText) formData.append('jd_text', jdText);
 
     try {
       const response = await fetch('/api/analyze', {
@@ -74,9 +72,7 @@ export default function App() {
     { id: 'job-match', label: 'Job Match', icon: <Layers className="w-4 h-4" />, disabled: !analysisData },
     { id: 'skill-dna', label: 'Skill DNA', icon: <Dna className="w-4 h-4" />, disabled: !analysisData },
     { id: 'career-intel', label: 'Career Intelligence', icon: <Compass className="w-4 h-4" />, disabled: !analysisData },
-    { id: 'career-gps', label: 'Career GPS', icon: <MapPin className="w-4 h-4" />, disabled: !analysisData },
     { id: 'what-if', label: 'What-If Sandbox', icon: <Sliders className="w-4 h-4" />, disabled: !analysisData },
-    { id: 'learning-path', label: 'Learning Path', icon: <GraduationCap className="w-4 h-4" />, disabled: !analysisData },
     { id: 'ai-interview', label: 'AI Interview', icon: <Cpu className="w-4 h-4" />, disabled: !analysisData },
     { id: 'evidence', label: 'Semantic Evidence', icon: <Database className="w-4 h-4" />, disabled: !analysisData },
     { id: 'recruiter', label: 'Recruiter Mode', icon: <Users className="w-4 h-4" /> },
@@ -112,13 +108,12 @@ export default function App() {
                   }
                 }}
                 disabled={item.disabled}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-                  activeTab === item.id
-                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
-                    : item.disabled
+                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${activeTab === item.id
+                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
+                  : item.disabled
                     ? 'text-slate-600 cursor-not-allowed opacity-50'
                     : 'text-slate-400 hover:text-white hover:bg-slate-900/80'
-                }`}
+                  }`}
               >
                 <div className="flex items-center gap-3">
                   {item.icon}
@@ -161,9 +156,7 @@ export default function App() {
           {activeTab === 'job-match' && <JobMatchView data={analysisData} />}
           {activeTab === 'skill-dna' && <SkillDnaView data={analysisData} />}
           {activeTab === 'career-intel' && <CareerIntelligenceView data={analysisData} />}
-          {activeTab === 'career-gps' && <CareerGpsView data={analysisData} />}
           {activeTab === 'what-if' && <WhatIfView data={analysisData} />}
-          {activeTab === 'learning-path' && <LearningPathView data={analysisData} />}
           {activeTab === 'ai-interview' && <AiInterviewView data={analysisData} />}
           {activeTab === 'evidence' && <EvidenceView data={analysisData} />}
           {activeTab === 'recruiter' && <RecruiterView />}
