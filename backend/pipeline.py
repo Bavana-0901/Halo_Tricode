@@ -2,14 +2,26 @@ import re
 import math
 import io
 from typing import List, Dict, Any, Tuple
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+try:
+    import google.generativeai as genai
+    if os.environ.get("GEMINI_API_KEY"):
+        genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
+except ImportError:
+    genai = None
 
 # Try imports for document processing
 try:
-    import pypdf
+    # pyrefly: ignore [missing-import]
+    import pypdf    
 except ImportError:
     pypdf = None
 
 try:
+    # pyrefly: ignore [missing-import]
     import docx
 except ImportError:
     docx = None
@@ -21,6 +33,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 # Optional sentence transformers
 try:
+    # pyrefly: ignore [missing-import]
     from sentence_transformers import SentenceTransformer
     ST_MODEL = SentenceTransformer('all-MiniLM-L6-v2')
 except Exception:
@@ -56,6 +69,24 @@ def extract_text_from_bytes(file_bytes: bytes, filename: str) -> str:
                 print(f"DOCX extraction warning: {e}")
         if not text:
             text = file_bytes.decode('utf-8', errors='ignore')
+            
+    elif fname.endswith((".png", ".jpg", ".jpeg", ".webp")):
+        if genai and os.environ.get("GEMINI_API_KEY"):
+            try:
+                from PIL import Image
+                image = Image.open(io.BytesIO(file_bytes))
+                model = genai.GenerativeModel("gemini-1.5-flash")
+                response = model.generate_content([
+                    "Extract all text from this image exactly as it appears. Preserve structure where possible. Do not add any introductory text, just return the text.", 
+                    image
+                ])
+                text = response.text
+            except Exception as e:
+                print(f"Gemini OCR error: {e}")
+                text = ""
+        else:
+            print("OCR requested but Gemini API key not found or module not installed.")
+            text = ""
             
     else:
         # Standard text

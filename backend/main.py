@@ -1,4 +1,5 @@
 import os
+import json
 import uvicorn
 from typing import List, Dict, Any, Optional
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, status
@@ -64,7 +65,8 @@ async def health_check():
 @app.post("/api/analyze")
 async def analyze_resume_and_jd(
     file: UploadFile = File(...),
-    jd_text: str = Form(...)
+    jd_text: Optional[str] = Form(None),
+    jd_file: Optional[UploadFile] = File(None)
 ):
     if not file:
         raise HTTPException(status_code=400, detail="Resume file is required.")
@@ -78,6 +80,19 @@ async def analyze_resume_and_jd(
     if not raw_text or len(raw_text.strip()) < 20:
         raise HTTPException(status_code=400, detail="Could not extract readable text from the uploaded file.")
 
+    actual_jd_text = ""
+    if jd_file:
+        try:
+            jd_contents = await jd_file.read()
+            actual_jd_text = extract_text_from_bytes(jd_contents, jd_file.filename)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to read JD file: {str(e)}")
+    elif jd_text:
+        actual_jd_text = jd_text
+
+    if not actual_jd_text or len(actual_jd_text.strip()) < 20:
+        raise HTTPException(status_code=400, detail="Could not extract readable text from the job description.")
+
     # 1. Text Chunking
     chunks = chunk_text(raw_text, chunk_words=60, overlap_words=15)
     
@@ -85,17 +100,17 @@ async def analyze_resume_and_jd(
     vector_index = VectorIndex(chunks)
 
     # 3. Calculate 6-factor Compatibility Score
-    compatibility = calculate_compatibility(raw_text, jd_text, vector_index)
+    compatibility = calculate_compatibility(raw_text, actual_jd_text, vector_index)
 
     # 4. Extract Skills (Resume & JD)
     resume_skills_categorized, resume_skills_flat = extract_skills(raw_text)
-    jd_skills_categorized, jd_skills_flat = extract_skills(jd_text)
+    jd_skills_categorized, jd_skills_flat = extract_skills(actual_jd_text)
 
     # 5. Skill Gap Analysis & Evidence Retrieval
-    skill_analysis = analyze_skill_gaps(raw_text, jd_text, vector_index)
+    skill_analysis = analyze_skill_gaps(raw_text, actual_jd_text, vector_index)
 
     # 6. Semantic Evidence Search for Top JD Requirements
-    jd_requirements = extract_jd_requirements(jd_text)
+    jd_requirements = extract_jd_requirements(actual_jd_text)
     semantic_evidence = []
     for req in jd_requirements[:6]:
         req_title = req["skill"]
@@ -110,10 +125,10 @@ async def analyze_resume_and_jd(
             })
 
     # 7. ATS Audit Analysis
-    ats_report = analyze_ats(raw_text, jd_text)
+    ats_report = analyze_ats(raw_text, actual_jd_text)
 
     # 8. Personalized Interview Questions
-    interview_questions = generate_interview_questions(raw_text, jd_text, skill_analysis["gaps"], vector_index)
+    interview_questions = generate_interview_questions(raw_text, actual_jd_text, skill_analysis["gaps"], vector_index)
 
     # 9. Role Compatibility (7 Roles)
     role_compatibility = analyze_role_compatibility(raw_text)
@@ -135,7 +150,7 @@ async def analyze_resume_and_jd(
         "success": True,
         "resume_filename": file.filename,
         "resume_text": raw_text,
-        "jd_text": jd_text,
+        "jd_text": actual_jd_text,
         "resume_summary": f"Uploaded candidate resume ({len(raw_text.split())} words, {len(resume_skills_flat)} skills identified across {len(resume_skills_categorized)} categories).",
         "compatibility": compatibility,
         "skills_found": resume_skills_categorized,
@@ -187,25 +202,55 @@ async def evaluate_interview_answer(req: AnswerEvalRequest):
     ans = req.user_answer.strip()
     ans_length = len(ans.split())
 
-    if ans_length < 5:
-        score = 35
-        strengths = ["Responded to the prompt."]
-        improvements = ["Answer is very brief. Elaborate with specific technical details, tools used, and concrete results."]
-    elif ans_length < 25:
-        score = 70
-        strengths = ["Clear concise answer."]
-        improvements = ["Include quantitative metrics and specific architectural decisions to demonstrate senior capability."]
-    else:
-        score = 92
-        strengths = ["Detailed comprehensive response.", "Demonstrated structured technical problem solving.", "Good context and depth."]
-        improvements = ["Maintain this level of STAR method detail (Situation, Task, Action, Result) in live interviews."]
+    if ans_length < 3 or "qwerty" in ans.lower() or "asdf" in ans.lower():
+        return {
+            "score": 0,
+            "feedback": "Answer is irrelevant or too short.",
+            "strengths": [],
+            "improvements": ["Provide a detailed technical answer demonstrating your experience."]
+        }
 
-    return {
-        "score": score,
-        "feedback": "Strong answer with good technical depth!" if score >= 80 else "Decent start, but needs more concrete technical examples.",
-        "strengths": strengths,
-        "improvements": improvements
-    }
+    try:
+        import google.generativeai as genai
+        if os.environ.get("GEMINI_API_KEY"):
+            model = genai.GenerativeModel("gemini-1.5-flash")
+            prompt = f"""
+You are an expert technical interviewer evaluating a candidate's answer.
+Question: {req.question_text}
+Candidate's Answer: {ans}
+Candidate's Resume Extract: {req.resume_text[:2000]}
+Target Job Description Extract: {req.jd_text[:2000]}
+
+Evaluate the candidate's answer based on Relevance (0-30), Correctness (0-30), Completeness (0-20), Technical Accuracy (0-10), and Evidence (0-10).
+CRITICAL RULES:
+- If the answer is irrelevant, nonsense, or does not answer the question, give a score of 0. Do NOT give a positive score just because text was entered.
+- Return ONLY a valid JSON object with the following keys exactly: "score" (integer 0-100), "feedback" (string), "strengths" (list of strings), "improvements" (list of strings).
+"""
+            response = model.generate_content(prompt)
+            raw_text = response.text.strip()
+            if raw_text.startswith("```json"):
+                raw_text = raw_text[7:-3].strip()
+            elif raw_text.startswith("```"):
+                raw_text = raw_text[3:-3].strip()
+            eval_data = json.loads(raw_text)
+            
+            return {
+                "score": max(0, min(100, int(eval_data.get("score", 0)))),
+                "feedback": eval_data.get("feedback", "No feedback provided."),
+                "strengths": eval_data.get("strengths", []),
+                "improvements": eval_data.get("improvements", [])
+            }
+        else:
+            raise Exception("No GEMINI_API_KEY found")
+    except Exception as e:
+        print(f"LLM Eval error: {e}")
+        # Fallback deterministic
+        return {
+            "score": min(100, ans_length * 2),
+            "feedback": "Deterministic fallback used due to missing API key.",
+            "strengths": ["Answered the prompt."],
+            "improvements": ["Connect more tightly to the JD requirements."]
+        }
 
 
 # --- RECRUITER MULTI-RESUME ROUTE ---
