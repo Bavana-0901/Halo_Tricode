@@ -31,6 +31,9 @@ export default function ResumeAnalysisView({ data }) {
         <div className="glass-panel p-6 rounded-2xl border border-slate-800">
           <div className="text-xs text-slate-400 font-semibold uppercase tracking-wider mb-1">Bullet Impact Rating</div>
           <div className="text-4xl font-extrabold text-purple-400 mb-2">{bullet_impact} <span className="text-sm font-normal text-slate-500">/ 100</span></div>
+          <p className="text-xs text-slate-400 mb-3">
+            {ats_analysis?.strong_bullet_count || 0} of {ats_analysis?.bullet_count || 0} bullet points contain strong action verbs and {ats_analysis?.measurable_bullet_count || 0} include measurable results.
+          </p>
           <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
             <div className="bg-purple-500 h-full rounded-full" style={{ width: `${bullet_impact}%` }} />
           </div>
@@ -47,7 +50,7 @@ export default function ResumeAnalysisView({ data }) {
         <div className="glass-panel p-6 rounded-2xl border border-slate-800">
           <div className="text-xs text-slate-400 font-semibold uppercase tracking-wider mb-1">Action Verbs Found</div>
           <div className="text-4xl font-extrabold text-amber-400 mb-2">{action_verbs_found?.length || 0}</div>
-          <div className="text-xs text-slate-400">Total word count: {word_count} words</div>
+          <div className="text-xs text-slate-400">Detected in the uploaded resume. Total word count: {word_count} words</div>
         </div>
       </div>
 

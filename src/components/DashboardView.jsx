@@ -49,10 +49,10 @@ export default function DashboardView({ data, onNavigate }) {
       {/* 6-FACTOR SCORE BREAKDOWN GRID */}
       <div>
         <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-          <Layers className="w-5 h-5 text-indigo-400" /> 6-Factor Compatibility Breakdown
+          <Layers className="w-5 h-5 text-indigo-400" /> Compatibility Breakdown
         </h2>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
           {Object.entries(breakdown).map(([factor, factorScore]) => (
             <div key={factor} className="glass-panel p-4 rounded-xl border border-slate-800 hover:border-indigo-500/30 transition-all">
               <div className="text-xs text-slate-400 font-medium truncate mb-2">{factor}</div>
@@ -114,6 +114,16 @@ export default function DashboardView({ data, onNavigate }) {
                 <span>Missing Skills</span>
                 <span className="text-rose-400 font-semibold">{skill_match?.missing?.length || 0}</span>
               </div>
+            </div>
+            <div className="border-t border-slate-800 pt-3">
+              <div className="text-xs font-semibold text-slate-300 mb-2">Missing Skills</div>
+              {skill_match?.missing?.length ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {skill_match.missing.map((item) => (
+                    <span key={item.skill} className="px-2 py-1 rounded-md text-[11px] bg-rose-500/10 text-rose-300 border border-rose-500/20">{item.skill}</span>
+                  ))}
+                </div>
+              ) : <p className="text-xs text-emerald-400">No major skill gaps detected.</p>}
             </div>
           </div>
           <button 

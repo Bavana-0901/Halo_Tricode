@@ -102,10 +102,9 @@ def clean_text(text: str) -> str:
     """Clean text by removing excessive whitespace and invalid control characters."""
     if not text:
         return ""
-    # Normalize space
-    text = re.sub(r'[\r\n\t]+', ' ', text)
-    text = re.sub(r'\s{2,}', ' ', text)
-    return text.strip()
+    text = text.replace("\r", "\n").replace("\t", " ")
+    lines = [re.sub(r" {2,}", " ", line).strip() for line in text.split("\n")]
+    return "\n".join(line for line in lines if line)
 
 
 # --- CHUNKING ENGINE ---
@@ -263,66 +262,137 @@ def extract_jd_requirements(jd_text: str) -> List[Dict[str, Any]]:
     return requirements
 
 
-# --- 6-FACTOR SCORE CALCULATOR ---
+# --- RESUME EVIDENCE HELPERS ---
+ACTION_VERB_LIST = {
+    "developed", "built", "created", "designed", "implemented", "launched", "managed",
+    "led", "engineered", "optimized", "increased", "reduced", "automated", "architected",
+    "orchestrated", "deployed", "scaled", "delivered", "transformed", "spearheaded"
+}
+
+def _resume_bullets(text: str) -> List[str]:
+    return [line.strip(" -•*\t") for line in text.splitlines() if len(line.strip(" -•*\t")) >= 20]
+
+def _project_evidence(text: str) -> List[str]:
+    lines = _resume_bullets(text)
+    markers = ("project", "built", "developed", "created", "designed", "implemented", "deployed", "github")
+    return [line for line in lines if any(marker in line.lower() for marker in markers)]
+
+def _keyword_tokens(text: str) -> set:
+    return set(re.findall(r"[a-z][a-z0-9+#.-]{2,}", text.lower()))
+
+def _section_lines(text: str, headings: tuple) -> List[str]:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    active = False
+    result = []
+    for line in lines:
+        normalized = line.lower().strip(" :-")
+        if any(heading in normalized for heading in headings):
+            active = True
+            continue
+        if active and re.fullmatch(r"[A-Z][A-Z &/]+", line):
+            break
+        if active and len(line) >= 12:
+            result.append(line.strip(" -•*"))
+    return result
+
+def _safe_resume_evidence(value: str, limit: int = 180) -> str:
+    value = re.sub(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b", "", value)
+    value = re.sub(r"(?:https?://|www\.)\S+|github\.com/\S+", "", value, flags=re.I)
+    value = re.sub(r"(?:\+?\d[\d ()-]{7,}\d)", "", value)
+    return re.sub(r"\s{2,}", " ", value).strip()[:limit]
+
+def extract_candidate_info(text: str) -> Dict[str, Any]:
+    email_match = re.search(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b", text)
+    phone_match = re.search(r"(?:\+?\d[\d ()-]{7,}\d)", text)
+    first_line = next((line.strip() for line in text.splitlines() if line.strip()), "")
+    name = first_line if first_line and not re.search(r"@|resume|curriculum vitae|phone|email", first_line, re.I) else None
+    age_match = re.search(r"\bage\s*[:\-]?\s*(\d{2})\b", text, re.I)
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    role = next((line for line in lines[1:4] if not re.search(r"@|phone|email|linkedin|github", line, re.I)), None)
+    education = _section_lines(text, ("education", "academic"))
+    certifications = _section_lines(text, ("certification", "certifications"))
+    projects = _section_lines(text, ("project", "projects"))
+    experience = _section_lines(text, ("experience", "employment", "work history"))
+    return {
+        "name": name,
+        "email": email_match.group(0) if email_match else None,
+        "phone": phone_match.group(0) if phone_match else None,
+        "age": int(age_match.group(1)) if age_match else None,
+        "professional_role": role,
+        "experience": experience,
+        "education": education,
+        "certifications": certifications,
+        "projects": projects,
+        "skills": extract_skills(text)[1]
+    }
+
+
+# --- 5-FACTOR SCORE CALCULATOR ---
 def calculate_compatibility(resume_text: str, jd_text: str, vector_index: VectorIndex) -> Dict[str, Any]:
-    """Calculate transparent 6-factor job compatibility score (0-100)."""
+    """Calculate evidence-based compatibility scores from the supplied resume and JD."""
     r_cat_skills, r_skills = extract_skills(resume_text)
     j_cat_skills, j_skills = extract_skills(jd_text)
     
     r_skills_set = set([s.lower() for s in r_skills])
     j_skills_set = set([s.lower() for s in j_skills])
     
-    # 1. Skill Match (25%)
-    if j_skills_set:
-        matched = r_skills_set.intersection(j_skills_set)
-        skill_score = min(100.0, (len(matched) / len(j_skills_set)) * 100.0)
-    else:
-        skill_score = 75.0
+    matched = r_skills_set.intersection(j_skills_set)
+    skill_score = (len(matched) / len(j_skills_set) * 100.0) if j_skills_set else 0.0
         
     # 2. Experience Score (20%)
     r_exp_matches = re.findall(r'(\d+)\+?\s*(?:years?|yrs?)', resume_text.lower())
     j_exp_matches = re.findall(r'(\d+)\+?\s*(?:years?|yrs?)', jd_text.lower())
-    r_years = max([int(x) for x in r_exp_matches], default=1)
-    j_years = max([int(x) for x in j_exp_matches], default=2)
-    exp_score = min(100.0, (r_years / max(1, j_years)) * 100.0)
+    r_years = max([int(x) for x in r_exp_matches], default=0)
+    j_years = max([int(x) for x in j_exp_matches], default=0)
+    exp_score = 100.0 if j_years == 0 and r_years > 0 else (0.0 if j_years == 0 else min(100.0, r_years / j_years * 100.0))
     
-    # 3. Projects Score (15%)
-    proj_keywords = ["project", "built", "developed", "created", "designed", "implemented", "deployed", "github"]
-    proj_count = sum(1 for kw in proj_keywords if kw in resume_text.lower())
-    proj_score = min(100.0, (proj_count / 5.0) * 100.0)
+    # 3. Projects Score (15%): score only the resume's Projects section.
+    project_lines = _section_lines(resume_text, ("project",))
+    if not project_lines:
+        project_lines = [
+            line.strip(" -•*") for line in resume_text.splitlines()
+            if re.search(r"\bproject\b", line, re.I) and len(line.strip()) >= 20
+        ]
+    project_text = " ".join(project_lines)
+    project_skills = {skill.lower() for skill in extract_skills(project_text)[1]}
+    jd_skill_set = {skill.lower() for skill in j_skills}
+    jd_tokens = _keyword_tokens(jd_text)
+    project_tokens = _keyword_tokens(project_text)
+    project_relevance = len(project_skills & jd_skill_set) / max(1, len(jd_skill_set))
+    text_relevance = len(project_tokens & jd_tokens) / max(1, len(jd_tokens))
+    contribution_count = sum(bool(re.search(
+        r"\b(?:built|created|developed|designed|implemented|deployed|managed|optimized|architected|led)\b",
+        line, re.I
+    )) for line in project_lines)
+    measurable_count = sum(bool(re.search(
+        r"\b\d+(?:\.\d+)?\s*(?:%|x|\+|k|m|users?|clients?|requests?|seconds?|hours?)\b",
+        line, re.I
+    )) for line in project_lines)
+    complexity_score = min(100.0, len(project_skills) / max(1, len(jd_skill_set)) * 100.0)
+    detail_score = min(100.0, sum(len(line.split()) for line in project_lines) / max(1, len(project_lines)) * 4.0)
+    project_count_score = min(100.0, len(project_lines) * 35.0)
+    contribution_score = contribution_count / max(1, len(project_lines)) * 100.0
+    measurable_score = measurable_count / max(1, len(project_lines)) * 100.0
+    relevance_score = min(100.0, project_relevance * 75.0 + text_relevance * 25.0)
+    proj_score = round(
+        project_count_score * 0.15 + detail_score * 0.15 + relevance_score * 0.30 +
+        complexity_score * 0.20 + contribution_score * 0.15 + measurable_score * 0.05
+    ) if project_lines else 0
     
     # 4. Education Score (10%)
     edu_keywords = ["bachelor", "master", "phd", "b.tech", "m.tech", "bs", "ms", "computer science", "engineering", "university", "degree"]
     edu_found = sum(1 for ek in edu_keywords if ek in resume_text.lower())
-    edu_score = min(100.0, 60.0 + (edu_found * 10.0))
-    
-    # 5. Semantic Match Score (20%)
-    if jd_text and vector_index.texts:
-        search_res = vector_index.search(jd_text[:300], top_k=5)
-        if search_res:
-            avg_sim = sum(item["similarity"] for item in search_res) / len(search_res)
-            semantic_score = min(100.0, avg_sim * 100.0)
-        else:
-            semantic_score = 60.0
-    else:
-        semantic_score = 60.0
+    edu_score = min(100.0, edu_found / max(1, len(edu_keywords)) * 140.0)
 
     # 6. JD Coverage Score (10%)
     jd_words = set(re.findall(r'\w{4,}', jd_text.lower()))
     resume_words = set(re.findall(r'\w{4,}', resume_text.lower()))
-    if jd_words:
-        coverage_score = min(100.0, (len(jd_words.intersection(resume_words)) / len(jd_words)) * 120.0)
-    else:
-        coverage_score = 70.0
+    coverage_score = (len(jd_words.intersection(resume_words)) / len(jd_words) * 100.0) if jd_words else 0.0
 
     # Weighted Overall Score
     overall_score = round(
-        (skill_score * 0.25) +
-        (exp_score * 0.20) +
-        (proj_score * 0.15) +
-        (edu_score * 0.10) +
-        (semantic_score * 0.20) +
-        (coverage_score * 0.10),
+        (skill_score * 0.35) + (exp_score * 0.15) + (proj_score * 0.20) +
+        (edu_score * 0.10) + (coverage_score * 0.20),
         1
     )
 
@@ -333,7 +403,6 @@ def calculate_compatibility(resume_text: str, jd_text: str, vector_index: Vector
             "Experience": int(round(exp_score)),
             "Projects": int(round(proj_score)),
             "Education": int(round(edu_score)),
-            "Semantic Match": int(round(semantic_score)),
             "JD Coverage": int(round(coverage_score))
         }
     }
@@ -341,13 +410,17 @@ def calculate_compatibility(resume_text: str, jd_text: str, vector_index: Vector
 
 # --- SKILL MATCH & SKILL GAP ENGINE ---
 def analyze_skill_gaps(resume_text: str, jd_text: str, vector_index: VectorIndex) -> Dict[str, Any]:
-    """Identify matched, partial, and missing skills with evidence retrieved via vector search."""
+    """Classify JD skills from explicit resume evidence without treating similarity as proof."""
     r_cat_skills, r_skills = extract_skills(resume_text)
     j_cat_skills, j_skills = extract_skills(jd_text)
-    
+
     r_skills_lower = {s.lower(): s for s in r_skills}
-    j_skills_lower = {s.lower(): s for s in j_skills}
-    
+    soft_skills = {skill.lower() for skill in j_cat_skills.get("Soft Skills", [])}
+    j_skills_lower = {
+        s.lower(): s for s in j_skills
+        if s.lower() not in soft_skills or s.lower() in r_skills_lower
+    }
+
     matched_skills = []
     partial_skills = []
     missing_skills = []
@@ -355,44 +428,53 @@ def analyze_skill_gaps(resume_text: str, jd_text: str, vector_index: VectorIndex
 
     for sk_lower, sk_name in j_skills_lower.items():
         if sk_lower in r_skills_lower:
-            # Semantic search for exact chunk evidence
-            ev_chunks = vector_index.search(sk_name, top_k=1)
-            evidence_text = ev_chunks[0]["text"] if ev_chunks else f"Candidate profile includes {sk_name}"
-            matched_skills.append({
-                "skill": sk_name,
-                "status": "MATCHED",
-                "evidence": evidence_text[:140] + "...",
-                "match_type": "Strong"
-            })
-        else:
-            # Check for partial mention via vector similarity search
-            ev_chunks = vector_index.search(f"Experience with {sk_name}", top_k=1)
-            if ev_chunks and ev_chunks[0]["similarity"] > 0.45:
+            evidence_lines = [
+                line.strip(" -•*") for line in resume_text.splitlines()
+                if re.search(re.escape(sk_name), line, re.I)
+            ]
+            evidence_text = evidence_lines[0] if evidence_lines else f"{sk_name} is listed in the uploaded resume."
+            implementation_evidence = any(
+                not re.search(r"\b(?:skills?|technologies?|tools?|proficien(?:t|cy))\b", line, re.I)
+                and (
+                    re.search(r"\b(?:built|created|developed|designed|implemented|deployed|managed|optimized|used|worked)\b", line, re.I)
+                    or re.search(r"\b\d+(?:%|\+|x|users?|clients?|requests?)\b", line, re.I)
+                    or re.search(r"\b(?:project|experience|application|system|api|database|analysis|reporting)\b", line, re.I)
+                )
+                for line in evidence_lines
+            )
+            if implementation_evidence:
+                matched_skills.append({
+                    "skill": sk_name,
+                    "status": "MATCHED",
+                    "evidence": evidence_text[:140] + ("..." if len(evidence_text) > 140 else ""),
+                    "match_type": "Strong"
+                })
+            else:
                 partial_skills.append({
                     "skill": sk_name,
                     "status": "PARTIAL",
-                    "evidence": ev_chunks[0]["text"][:140] + "...",
+                    "evidence": evidence_text[:140] + ("..." if len(evidence_text) > 140 else ""),
                     "match_type": "Moderate"
                 })
                 skill_gaps.append({
                     "skill": sk_name,
-                    "current_evidence": ev_chunks[0]["text"][:100] + "...",
-                    "required_level": "Advanced / Production",
-                    "improvement_needed": f"Add dedicated project bullet points demonstrating production implementation of {sk_name}."
+                    "current_evidence": evidence_text[:100],
+                    "required_level": "Practical implementation",
+                    "improvement_needed": f"Add a concrete responsibility, project, or result demonstrating {sk_name}."
                 })
-            else:
-                missing_skills.append({
-                    "skill": sk_name,
-                    "status": "MISSING",
-                    "evidence": "No evidence found in resume",
-                    "match_type": "None"
-                })
-                skill_gaps.append({
-                    "skill": sk_name,
-                    "current_evidence": "No direct evidence found",
-                    "required_level": "Intermediate to Advanced",
-                    "improvement_needed": f"Acquire practical experience with {sk_name} and add a hands-on project to resume."
-                })
+        else:
+            missing_skills.append({
+                "skill": sk_name,
+                "status": "MISSING",
+                "evidence": "No explicit evidence found in uploaded resume",
+                "match_type": "None"
+            })
+            skill_gaps.append({
+                "skill": sk_name,
+                "current_evidence": "No explicit evidence found in uploaded resume",
+                "required_level": "Intermediate to Advanced",
+                "improvement_needed": f"Add resume evidence demonstrating practical use of {sk_name}."
+            })
 
     return {
         "matched": matched_skills,
@@ -407,44 +489,43 @@ def analyze_ats(resume_text: str, jd_text: str) -> Dict[str, Any]:
     """Perform comprehensive ATS health check, bullet impact evaluation, and keyword audit."""
     words = re.findall(r'\w+', resume_text)
     word_count = len(words)
-    
-    # Action verbs check
-    action_verbs = [
-        "developed", "built", "created", "designed", "implemented", "launched", "managed",
-        "led", "engineered", "optimized", "increased", "reduced", "automated", "architected",
-        "orchestrated", "deployed", "scaled", "delivered", "transformed", "spearheaded"
-    ]
-    found_verbs = set([w.lower() for w in words if w.lower() in action_verbs])
-    
-    # Bullet metrics check (numbers, percentages)
-    metric_matches = re.findall(r'\b\d+(?:%|\+|k|m|x)?\b', resume_text.lower())
-    
-    # Keyword coverage
+
+    bullets = _resume_bullets(resume_text)
+    bullet_count = len(bullets)
+    lower_words = [w.lower() for w in words]
+    found_verbs = sorted({word for word in lower_words if word in ACTION_VERB_LIST})
+    strong_bullet_count = sum(bool(re.search(r"\b(?:" + "|".join(ACTION_VERB_LIST) + r")\b", bullet, re.I)) for bullet in bullets)
+    measurable_bullet_count = sum(bool(re.search(r"\b\d+(?:\.\d+)?\s*(?:%|x|\+|k|m|users?|clients?|seconds?|hours?)?\b", bullet, re.I)) for bullet in bullets)
+    technical_bullet_count = sum(bool(extract_skills(bullet)[1]) for bullet in bullets)
+
     r_cat_skills, r_skills = extract_skills(resume_text)
     j_cat_skills, j_skills = extract_skills(jd_text)
-    
     j_skills_set = set([s.lower() for s in j_skills])
     r_skills_set = set([s.lower() for s in r_skills])
     kw_coverage = (len(r_skills_set.intersection(j_skills_set)) / max(1, len(j_skills_set))) * 100.0
 
-    ats_score = int(min(100, max(40, (kw_coverage * 0.5) + (len(found_verbs) * 2.5) + (min(word_count, 600) / 10))))
-    bullet_impact = int(min(100, (len(metric_matches) * 12) + (len(found_verbs) * 4)))
+    headings = sum(bool(re.search(r"\b(?:experience|education|projects?|skills?|summary|certifications?)\b", line, re.I)) for line in resume_text.splitlines())
+    contact_signals = sum(bool(re.search(pattern, resume_text, re.I)) for pattern in [r"\b[^\s@]+@[^\s@]+\.[^\s@]+\b", r"(?:\+?\d[\d ()-]{7,}\d)"])
+    bullet_impact = round((strong_bullet_count / max(1, bullet_count) * 35) + (measurable_bullet_count / max(1, bullet_count) * 30) + (technical_bullet_count / max(1, bullet_count) * 20) + min(15, len(project_lines := _project_evidence(resume_text)) * 3))
+    ats_score = round(min(100, kw_coverage * 0.35 + bullet_impact * 0.3 + min(20, headings * 4) + contact_signals * 5 + min(10, word_count / 60)))
 
     strengths = []
-    if len(found_verbs) >= 5:
-        strengths.append(f"Strong action verb usage ({len(found_verbs)} unique action verbs found).")
-    if len(metric_matches) >= 3:
-        strengths.append(f"Quantifiable results included ({len(metric_matches)} metrics/percentages detected).")
+    if strong_bullet_count:
+        strengths.append(f"{strong_bullet_count} of {bullet_count} detected bullets begin with strong action language.")
+    if measurable_bullet_count:
+        strengths.append(f"{measurable_bullet_count} of {bullet_count} detected bullets include measurable results.")
     if r_skills:
         strengths.append(f"Clear technical skill taxonomy with {len(r_skills)} key skills identified.")
 
     weak_areas = []
-    if len(metric_matches) < 3:
-        weak_areas.append("Low metric density: Add measurable outcomes (e.g. 'Improved efficiency by 30%').")
-    if len(found_verbs) < 5:
-        weak_areas.append("Passive bullet phrasing: Replace passive verbs with high-impact action verbs.")
+    if measurable_bullet_count < max(1, bullet_count // 2):
+        weak_areas.append(f"Only {measurable_bullet_count} of {bullet_count} detected bullets include measurable results.")
+    if strong_bullet_count < max(1, bullet_count // 2):
+        weak_areas.append(f"Only {strong_bullet_count} of {bullet_count} detected bullets use strong action verbs.")
     if kw_coverage < 60:
         weak_areas.append(f"Missing core JD keywords ({int(100 - kw_coverage)}% keyword gap).")
+    if headings == 0:
+        weak_areas.append("No standard resume section headings were detected.")
 
     suggestions = [
         "Tailor bullet points to directly match the phrasing of requirements in the target Job Description.",
@@ -457,75 +538,70 @@ def analyze_ats(resume_text: str, jd_text: str) -> Dict[str, Any]:
         "bullet_impact": bullet_impact,
         "keyword_coverage": int(round(kw_coverage)),
         "word_count": word_count,
-        "action_verbs_found": sorted(list(found_verbs)),
-        "metrics_found": len(metric_matches),
-        "strengths": strengths if strengths else ["Basic resume structure is readable."],
-        "weak_areas": weak_areas if weak_areas else ["No major structural weaknesses detected."],
+        "action_verbs_found": found_verbs,
+        "metrics_found": measurable_bullet_count,
+        "bullet_count": bullet_count,
+        "strong_bullet_count": strong_bullet_count,
+        "measurable_bullet_count": measurable_bullet_count,
+        "strengths": strengths,
+        "weak_areas": weak_areas,
         "suggestions": suggestions
     }
 
 
 # --- TAILORED INTERVIEW GENERATOR ---
 def generate_interview_questions(resume_text: str, jd_text: str, gaps: List[Dict[str, Any]], vector_index: VectorIndex) -> List[Dict[str, Any]]:
-    """Generate 5 personalized, non-generic interview questions based on candidate profile & JD gaps."""
-    r_cat_skills, r_skills = extract_skills(resume_text)
-    
-    questions = []
-    
-    # Q1: Project & Architecture Question
-    top_proj_chunks = vector_index.search("project built developed architecture", top_k=1)
-    proj_context = top_proj_chunks[0]["text"][:120] if top_proj_chunks else "your core technical projects"
-    questions.append({
-        "id": "q1",
-        "category": "Project Architecture & System Design",
-        "question": f"In your resume, you mentioned work on: '{proj_context}...'. Can you walk me through the system architecture and key technical trade-offs you made?",
-        "context": "Evaluates practical implementation depth and architectural decision-making."
-    })
-    
-    # Q2: Skill Gap / Challenge Question
-    if gaps:
-        gap_skill = gaps[0]["skill"]
-        questions.append({
-            "id": "q2",
-            "category": "Target Skill Gap & Deep Dive",
-            "question": f"The job description strongly emphasizes production experience with {gap_skill}. How would you approach applying {gap_skill} in our environment given your background?",
-            "context": f"Probes candidate's adaptability to bridge the identified {gap_skill} gap."
-        })
-    else:
-        questions.append({
-            "id": "q2",
-            "category": "Technical Mastery",
-            "question": "How do you optimize performance and manage scalability challenges in your primary stack?",
-            "context": "Tests senior-level optimization capabilities."
-        })
+    """Generate five questions using only concrete evidence extracted from the resume."""
+    _, skills = extract_skills(resume_text)
+    projects = extract_candidate_info(resume_text)["projects"]
+    bullets = _resume_bullets(resume_text)
+    evidence = projects or bullets
+    if not evidence:
+        evidence = [line for line in resume_text.splitlines() if len(line.strip()) >= 20]
+    evidence = [_safe_resume_evidence(line) for line in evidence if _safe_resume_evidence(line)]
+    if not evidence:
+        return []
 
-    # Q3: Hands-on Problem Solving
-    questions.append({
-        "id": "q3",
-        "category": "Debugging & Troubleshooting",
-        "question": "Describe a critical bug or production outage you faced in a recent project. How did you diagnose the root cause and resolve it?",
-        "context": "Measures analytical troubleshooting and resilience under pressure."
-    })
-
-    # Q4: Domain / JD Requirement
-    j_cat_skills, j_skills = extract_skills(jd_text)
-    core_jd_sk = j_skills[0] if j_skills else "software engineering best practices"
-    questions.append({
-        "id": "q4",
-        "category": "Job Role Fit",
-        "question": f"Our team relies heavily on {core_jd_sk}. What are the top 3 best practices or design patterns you enforce when working with {core_jd_sk}?",
-        "context": f"Verifies alignment with key team skill: {core_jd_sk}."
-    })
-
-    # Q5: Behavioral & Leadership
-    questions.append({
-        "id": "q5",
-        "category": "Collaboration & Delivery",
-        "question": "Tell me about a situation where you had a technical disagreement with a team member or stakeholder regarding project requirements. How did you resolve it?",
-        "context": "Assesses communication, teamwork, and conflict resolution skills."
-    })
-
-    return questions
+    primary = evidence[0]
+    secondary = evidence[1] if len(evidence) > 1 else primary
+    skill = skills[0] if skills else None
+    skill_question = (
+        f"Your resume lists {skill}. Where did you use {skill}, and what implementation decision did you make with it?"
+        if skill else
+        f"Your resume states: '{primary}'. What specific implementation decision did you make in this work?"
+    )
+    return [
+        {
+            "id": "q1", "category": "Resume Evidence",
+            "question": f"Your resume states: '{primary}'. What was your specific contribution, and what did you implement?",
+            "context": "Tests the candidate's direct ownership of a claim in the resume.",
+            "source": primary, "expected_topics": ["contribution", "implementation", "ownership"]
+        },
+        {
+            "id": "q2", "category": "Technical Skill Application",
+            "question": skill_question,
+            "context": "Tests practical use of a technology explicitly listed in the resume.",
+            "source": skill or primary, "skill": skill, "expected_topics": [skill or "implementation", "technical decision"]
+        },
+        {
+            "id": "q3", "category": "Project Design",
+            "question": f"For the resume work described as '{secondary}', how did you design the solution and decide between the technologies you used?",
+            "context": "Tests design reasoning tied to a specific resume project or responsibility.",
+            "source": secondary, "expected_topics": ["design", "technology choice", "trade-off"]
+        },
+        {
+            "id": "q4", "category": "Problem Solving",
+            "question": f"The resume reports: '{primary}'. What was the hardest problem behind this result, how did you investigate it, and how did you verify the outcome?",
+            "context": "Tests problem-solving and validation of an actual resume claim.",
+            "source": primary, "expected_topics": ["problem", "investigation", "validation", "result"]
+        },
+        {
+            "id": "q5", "category": "Advanced Practical Understanding",
+            "question": f"Looking at your resume evidence '{secondary}', what would you improve now and why, given the constraints of that work?",
+            "context": "Tests reflection and advanced decision-making about claimed experience.",
+            "source": secondary, "expected_topics": ["constraints", "improvement", "decision-making"]
+        }
+    ]
 
 
 # --- CAREER INTELLIGENCE ROLE COMPATIBILITY ---

@@ -10,7 +10,6 @@ import {
   Sliders, 
   GraduationCap, 
   Cpu, 
-  Database, 
   Users, 
   Upload,
   ChevronRight,
@@ -26,7 +25,6 @@ import SkillDnaView from './components/SkillDnaView';
 import CareerIntelligenceView from './components/CareerIntelligenceView';
 import WhatIfView from './components/WhatIfView';
 import AiInterviewView from './components/AiInterviewView';
-import EvidenceView from './components/EvidenceView';
 import RecruiterView from './components/RecruiterView';
 
 export default function App() {
@@ -71,7 +69,6 @@ export default function App() {
     { id: 'career-intel', label: 'Career Intelligence', icon: <Compass className="w-4 h-4" />, disabled: !analysisData },
     { id: 'what-if', label: 'What-If Sandbox', icon: <Sliders className="w-4 h-4" />, disabled: !analysisData },
     { id: 'ai-interview', label: 'AI Interview', icon: <Cpu className="w-4 h-4" />, disabled: !analysisData },
-    { id: 'evidence', label: 'Semantic Evidence', icon: <Database className="w-4 h-4" />, disabled: !analysisData },
     { id: 'recruiter', label: 'Recruiter Mode', icon: <Users className="w-4 h-4" /> },
   ];
 
@@ -156,7 +153,6 @@ export default function App() {
           {activeTab === 'career-intel' && <CareerIntelligenceView data={analysisData} />}
           {activeTab === 'what-if' && <WhatIfView data={analysisData} />}
           {activeTab === 'ai-interview' && <AiInterviewView data={analysisData} />}
-          {activeTab === 'evidence' && <EvidenceView data={analysisData} />}
           {activeTab === 'recruiter' && <RecruiterView />}
         </main>
       </div>

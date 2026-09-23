@@ -16,6 +16,7 @@ from pipeline import (
     analyze_skill_gaps,
     analyze_ats,
     generate_interview_questions,
+    extract_candidate_info,
     analyze_role_compatibility,
     TARGET_ROLES
 )
@@ -50,6 +51,8 @@ class AnswerEvalRequest(BaseModel):
     user_answer: str
     resume_text: Optional[str] = ""
     jd_text: Optional[str] = ""
+    expected_topics: Optional[List[str]] = None
+    resume_evidence: Optional[str] = ""
 
 class RecruiterCopilotRequest(BaseModel):
     query: str
@@ -151,6 +154,7 @@ async def analyze_resume_and_jd(
         "resume_filename": file.filename,
         "resume_text": raw_text,
         "jd_text": actual_jd_text,
+        "candidate": extract_candidate_info(raw_text),
         "resume_summary": f"Uploaded candidate resume ({len(raw_text.split())} words, {len(resume_skills_flat)} skills identified across {len(resume_skills_categorized)} categories).",
         "compatibility": compatibility,
         "skills_found": resume_skills_categorized,
@@ -200,9 +204,8 @@ async def what_if_simulation(req: WhatIfRequest):
 @app.post("/api/interview/evaluate")
 async def evaluate_interview_answer(req: AnswerEvalRequest):
     ans = req.user_answer.strip()
-    ans_length = len(ans.split())
 
-    if ans_length < 3 or "qwerty" in ans.lower() or "asdf" in ans.lower():
+    if len(ans.split()) < 3 or "qwerty" in ans.lower() or "asdf" in ans.lower():
         return {
             "score": 0,
             "feedback": "Answer is irrelevant or too short.",
@@ -218,8 +221,8 @@ async def evaluate_interview_answer(req: AnswerEvalRequest):
 You are an expert technical interviewer evaluating a candidate's answer.
 Question: {req.question_text}
 Candidate's Answer: {ans}
-Candidate's Resume Extract: {req.resume_text[:2000]}
-Target Job Description Extract: {req.jd_text[:2000]}
+Relevant Resume Evidence: {req.resume_evidence or req.resume_text[:2000]}
+Expected topics: {req.expected_topics or []}
 
 Evaluate the candidate's answer based on Relevance (0-30), Correctness (0-30), Completeness (0-20), Technical Accuracy (0-10), and Evidence (0-10).
 CRITICAL RULES:
@@ -244,12 +247,27 @@ CRITICAL RULES:
             raise Exception("No GEMINI_API_KEY found")
     except Exception as e:
         print(f"LLM Eval error: {e}")
-        # Fallback deterministic
+        answer_terms = set(__import__("re").findall(r"[a-z][a-z0-9+#.-]{2,}", ans.lower()))
+        question_terms = set(__import__("re").findall(r"[a-z][a-z0-9+#.-]{3,}", req.question_text.lower()))
+        resume_terms = set(__import__("re").findall(r"[a-z][a-z0-9+#.-]{2,}", (req.resume_evidence or req.resume_text).lower()))
+        expected_terms = {topic.lower() for topic in (req.expected_topics or [])}
+        relevant_terms = (question_terms | expected_terms) & resume_terms
+        covered_terms = answer_terms & relevant_terms
+        technical_terms = answer_terms & set(extract_skills(req.resume_text + " " + req.jd_text)[1].__iter__())
+        if not covered_terms and not technical_terms:
+            return {
+                "score": 0,
+                "feedback": "The response does not address the resume- or job-specific question.",
+                "strengths": [],
+                "improvements": ["Answer the question directly and support the explanation with a concrete technical example."]
+            }
+        coverage = len(covered_terms) / max(1, len(relevant_terms))
+        score = min(85, round(35 + coverage * 35 + min(15, len(technical_terms) * 5)))
         return {
-            "score": min(100, ans_length * 2),
-            "feedback": "Deterministic fallback used due to missing API key.",
-            "strengths": ["Answered the prompt."],
-            "improvements": ["Connect more tightly to the JD requirements."]
+            "score": score,
+            "feedback": "The response contains terms relevant to the question, but detailed correctness could not be verified without the language model evaluator.",
+            "strengths": ["Addressed relevant resume or JD topics."],
+            "improvements": ["Add concrete implementation details, decisions, and measurable outcomes."]
         }
 
 

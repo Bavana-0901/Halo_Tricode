@@ -29,7 +29,9 @@ export default function AiInterviewView({ data }) {
           question_text: currentQ.question,
           user_answer: userAnswer,
           resume_text,
-          jd_text
+          jd_text,
+          expected_topics: currentQ.expected_topics || [],
+          resume_evidence: currentQ.source || ''
         })
       });
       const evalData = await res.json();
@@ -42,6 +44,7 @@ export default function AiInterviewView({ data }) {
         feedback: evalData.feedback,
         strengths: evalData.strengths,
         improvements: evalData.improvements
+        ,source: currentQ.source
       };
 
       const updatedLogs = [...answersLog, newLogItem];
@@ -78,7 +81,7 @@ export default function AiInterviewView({ data }) {
           <Cpu className="w-7 h-7 text-purple-400" /> Personalized AI Technical Interview
         </h1>
         <p className="text-sm text-slate-400">
-          5 questions generated specifically from your extracted resume chunks, target JD, and missing skill gaps.
+          5 questions generated specifically from evidence extracted from the uploaded resume.
         </p>
       </div>
 
@@ -153,8 +156,31 @@ export default function AiInterviewView({ data }) {
             <h2 className="text-3xl font-extrabold text-white">Interview Performance Score</h2>
             <div className="text-6xl font-black text-indigo-400">{avgScore} <span className="text-xl font-medium text-slate-500">/ 100</span></div>
             <p className="text-sm text-slate-300 max-w-xl mx-auto">
-              {avgScore >= 80 ? 'Outstanding technical articulation and architectural depth!' : 'Good effort! Review individual feedback below to strengthen your response structure.'}
+              {data.candidate?.name || 'Candidate'} completed {answersLog.length} of {questions.length} questions. Review the evidence-based feedback below.
             </p>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-left max-w-2xl mx-auto">
+              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800"><div className="text-[10px] uppercase text-slate-500">Name</div><div className="text-xs text-white mt-1">{data.candidate?.name || 'Not provided'}</div></div>
+              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800"><div className="text-[10px] uppercase text-slate-500">Email</div><div className="text-xs text-white mt-1 break-all">{data.candidate?.email || 'Not provided'}</div></div>
+              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800"><div className="text-[10px] uppercase text-slate-500">Phone</div><div className="text-xs text-white mt-1">{data.candidate?.phone || 'Not provided'}</div></div>
+              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800"><div className="text-[10px] uppercase text-slate-500">Age</div><div className="text-xs text-white mt-1">{data.candidate?.age || 'Not provided'}</div></div>
+            </div>
+            <div className="grid grid-cols-3 gap-3 max-w-md mx-auto text-xs text-slate-300">
+              <div>Questions<strong className="block text-white text-lg">{answersLog.length}</strong></div>
+              <div>Strong answers<strong className="block text-emerald-300 text-lg">{answersLog.filter((log) => log.score >= 70).length}</strong></div>
+              <div>Needs review<strong className="block text-amber-300 text-lg">{answersLog.filter((log) => log.score < 50).length}</strong></div>
+            </div>
+            <div className="text-left max-w-3xl mx-auto border-t border-slate-800 pt-5 space-y-3">
+              <h3 className="text-sm font-bold text-white">Candidate Summary</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div><span className="text-slate-500">Professional Role:</span> <span className="text-slate-200">{data.candidate?.professional_role || 'Not provided'}</span></div>
+                <div><span className="text-slate-500">Experience:</span> <span className="text-slate-200">{data.candidate?.experience?.join('; ') || 'Not provided'}</span></div>
+                <div><span className="text-slate-500">Education:</span> <span className="text-slate-200">{data.candidate?.education?.join('; ') || 'Not provided'}</span></div>
+                <div><span className="text-slate-500">Certifications:</span> <span className="text-slate-200">{data.candidate?.certifications?.join('; ') || 'Not provided'}</span></div>
+                <div><span className="text-slate-500">Key Skills:</span> <span className="text-slate-200">{data.candidate?.skills?.join(', ') || 'Not provided'}</span></div>
+              </div>
+              <div className="text-xs"><span className="text-slate-500">Projects:</span> <span className="text-slate-200">{data.candidate?.projects?.join('; ') || 'Not provided'}</span></div>
+            </div>
 
             <button
               onClick={handleRestart}
@@ -176,6 +202,7 @@ export default function AiInterviewView({ data }) {
                   </span>
                 </div>
                 <div className="text-sm text-white font-medium">"{log.question}"</div>
+                <div className="text-xs text-slate-500">Resume evidence: {log.source || 'Resume text'}</div>
                 <div className="p-3 rounded-xl bg-slate-950 text-xs text-slate-300 italic border border-slate-800">
                   Your Answer: "{log.answer}"
                 </div>

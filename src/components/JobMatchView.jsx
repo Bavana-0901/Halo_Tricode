@@ -48,6 +48,18 @@ export default function JobMatchView({ data }) {
         </div>
       </div>
 
+      <div className="glass-panel p-6 rounded-2xl border border-rose-500/20 bg-rose-950/10">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-base font-bold text-rose-300">Missing Skills</h3>
+          <span className="text-xs font-semibold text-rose-300">Total Missing Skills: {missing?.length || 0}</span>
+        </div>
+        {missing?.length ? (
+          <div className="flex flex-wrap gap-2">
+            {missing.map((item) => <span key={item.skill} className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-500/10 text-rose-200 border border-rose-500/20">{item.skill}</span>)}
+          </div>
+        ) : <p className="text-sm text-emerald-400">No major missing skills detected.</p>}
+      </div>
+
       {/* MATCHED & PARTIAL SKILLS LIST */}
       <div className="glass-panel p-6 rounded-2xl border border-slate-800">
         <h3 className="text-base font-bold text-white mb-4">Skill Match Breakdown</h3>
